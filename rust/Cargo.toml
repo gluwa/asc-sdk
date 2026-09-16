@@ -4,7 +4,7 @@ authors = ["Gluwa Inc. Developer Support <support.dev@gluwa.com>"]
 edition = "2021"
 license = "MIT"
 publish = false
-repository = "https://github.com/gluwa/cc-next-query-builder"
+repository = "https://github.com/gluwa/asc-sdk"
 version = "0.1.0"
 
 [[bin]]

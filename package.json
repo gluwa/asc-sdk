@@ -1,9 +1,9 @@
 {
-  "name": "@gluwa/usc-sdk",
-  "version": "0.18.0",
+  "name": "@gluwa/asc-sdk",
+  "version": "0.19.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/gluwa/cc-next-query-builder"
+    "url": "https://github.com/gluwa/asc-sdk"
   },
   "description": "Typescript SDK for the USC (Universal Smart Contracts) ecosystem on the Gluwa Creditcoin Network",
   "main": "dist/index.js",

@@ -7,7 +7,7 @@ import { Contract, JsonRpcApiProvider } from 'ethers';
  * estimation mode), falls back to a heuristic based on the continuity
  * proof size, matching the Rust logic.
  *
- * Ported from gluwa/usc-testnet-bridge-examples#77
+ * Ported from gluwa/attestcoin-protocol-examples#77
  * (decode-testing/submit_decode_query.ts).
  */
 export async function computeGasLimit(

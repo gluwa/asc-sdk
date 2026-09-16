@@ -1,4 +1,4 @@
-import { proofProvider, utils } from '@gluwa/usc-sdk';
+import { proofProvider, utils } from '@gluwa/asc-sdk';
 
 async function example(): Promise<void> {
   // IMPORTANT: You have to define these values before executing this example
