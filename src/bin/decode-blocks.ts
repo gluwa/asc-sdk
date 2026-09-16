@@ -62,7 +62,13 @@ async function decodeFromDisk(
   proverBaseUrl: string,
   chainKey: number,
   pacer: rateLimit.AdaptivePacer,
+  blockGasLimit: bigint,
 ): Promise<ProofSkipReason | null> {
+  // `blockGasLimit` is the hard ceiling; 70% is the block budget (see commit log + linked Slack
+  // thread); a third is the per-transaction tripwire, ahead of per-transaction gas limits landing
+  // on chain. The tripwire equals the 25M it replaces, derived so it cannot go stale.
+  const totalGasThreshold = (blockGasLimit * 7n) / 10n;
+  const singleTxnGasLimit = blockGasLimit / 3n;
   const verifyAndEmitSingleFragment =
     'verifyAndEmit(uint64,uint64,bytes,(bytes32,(bytes32,bool)[]),(bytes32,bytes32[]))';
 
@@ -100,14 +106,11 @@ async function decodeFromDisk(
       : `    ... gasForVerification skipped: prover returned ${skipReason}`,
   );
 
-  // Reject any single transaction whose individual gas cost crosses the
-  // per-transaction cap. A single tx must fit comfortably within a block
-  // on its own, so each estimate is checked against singleTxnGasLimit as
-  // soon as it becomes available.
-  const singleTxnGasLimit = 25_000_000n;
-  if (gasForVerification >= singleTxnGasLimit) {
+  // Check each component against the ceiling as it lands, so an unsubmittable estimate is
+  // attributed to verification or decoding rather than only to the combined total.
+  if (gasForVerification > blockGasLimit) {
     throw new Error(
-      `gasForVerification ${gasForVerification} reaches or exceeds the single transaction gas limit (${singleTxnGasLimit}); failing run`,
+      `gasForVerification ${gasForVerification} exceeds the ${blockGasLimit} block gas limit; unsubmittable, failing run`,
     );
   }
 
@@ -126,29 +129,27 @@ async function decodeFromDisk(
   );
   const gasForDecoding = decoded.gasUsed ?? BigInt(0);
   console.log(`     decoded as type ${decoded.type}, gasForDecoding=${gasForDecoding}`);
-  if (gasForDecoding >= singleTxnGasLimit) {
+  if (gasForDecoding > blockGasLimit) {
     throw new Error(
-      `gasForDecoding ${gasForDecoding} reaches or exceeds the single transaction gas limit (${singleTxnGasLimit}); failing run`,
+      `gasForDecoding ${gasForDecoding} exceeds the ${blockGasLimit} block gas limit; unsubmittable, failing run`,
     );
   }
 
-  // Add a 10% safety margin to the raw estimates and reject if the
-  // combined cost crosses 70% of the 75M block gas limit. Using bigint
-  // math (11/10 and 7/10) keeps the value precise and consistent with
-  // the rest of the script. The 70% threshold is an explicit decision;
-  // see commit log + linked Slack thread for context.
+  // 10% safety margin on the raw estimates. Most severe tier first, so an unsubmittable proof
+  // does not report as merely over budget.
   const totalGas = ((gasForVerification + gasForDecoding) * 11n) / 10n;
-  const blockGasLimit = 75_000_000n;
-  const totalGasThreshold = (blockGasLimit * 7n) / 10n;
   console.log(`    ... totalGas (with 10% margin)=${totalGas} (threshold=${totalGasThreshold})`);
-  if (totalGas >= singleTxnGasLimit) {
-    throw new Error(
-      `totalGas ${totalGas} reaches or exceeds the single transaction gas limit (${singleTxnGasLimit}); failing run`,
-    );
+  if (totalGas > blockGasLimit) {
+    throw new Error(`totalGas ${totalGas} exceeds the ${blockGasLimit} block gas limit; unsubmittable, failing run`);
   }
   if (totalGas >= totalGasThreshold) {
     throw new Error(
       `totalGas ${totalGas} reaches or exceeds 70% of the ${blockGasLimit} block gas limit (${totalGasThreshold}); failing run`,
+    );
+  }
+  if (totalGas >= singleTxnGasLimit) {
+    throw new Error(
+      `totalGas ${totalGas} reaches or exceeds the per-transaction tripwire (${singleTxnGasLimit}, a third of the ${blockGasLimit} block gas limit); failing run`,
     );
   }
 
@@ -199,6 +200,18 @@ async function decodeBlocks(
   const proverPrecompile = new blockProver.PrecompileBlockProver(creditcoinWs);
   const proverPrecompileWithSigner = proverPrecompile.blockProverContract.connect(
     Wallet.createRandom().connect(creditcoinWs),
+  );
+
+  // Read the block gas limit from chain rather than hard-coding it, so the checks track the
+  // runtime's `BlockGasLimit`. Constant per runtime, so fetched once. This is the hard ceiling:
+  // pallet-ethereum rejects a tx above it, though estimateGas can still report higher.
+  const latestBlock = await creditcoinWs.getBlock('finalized');
+  if (latestBlock === null || latestBlock.gasLimit <= 0n) {
+    throw new Error('could not read EVM block gas limit from chain');
+  }
+  const blockGasLimit = latestBlock.gasLimit;
+  console.log(
+    `INFO: on-chain EVM block gas limit = ${blockGasLimit} (hard ceiling), 70% threshold = ${(blockGasLimit * 7n) / 10n}, per-txn tripwire = ${blockGasLimit / 3n}`,
   );
 
   const encodedFiles = await glob('*/**.txt', { cwd: pathToStore, absolute: true });
@@ -261,6 +274,7 @@ async function decodeBlocks(
       proverUrl,
       chainKey,
       pacer,
+      blockGasLimit,
     );
 
     if (skipReason !== null) {
