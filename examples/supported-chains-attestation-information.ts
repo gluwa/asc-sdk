@@ -1,4 +1,4 @@
-import { chainInfo, utils } from '@gluwa/usc-sdk';
+import { chainInfo, utils } from '@gluwa/asc-sdk';
 import { JsonRpcProvider } from 'ethers';
 
 async function example(): Promise<void> {

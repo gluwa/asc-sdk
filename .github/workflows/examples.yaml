@@ -27,12 +27,12 @@ jobs:
           node-version: '24.x'
           cache: 'npm'
 
-      - name: Install @gluwa/usc-sdk from source
+      - name: Install @gluwa/asc-sdk from source
         run: |
           npm install
           npm run build
           npm pack
-          npm install ./gluwa-usc-sdk-*.tgz
+          npm install ./gluwa-asc-sdk-*.tgz
 
       - name: Execute examples
         env:
