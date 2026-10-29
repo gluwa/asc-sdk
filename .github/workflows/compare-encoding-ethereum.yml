@@ -95,7 +95,7 @@ jobs:
           webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
           status: ${{ job.status }}
           channel: '#protocol-internal'
-          message: 'Alloy encode failed! cc <!subteam^S028FDV6CCV>'
+          message: 'Ethereum: Alloy encoding failed! cc <!subteam^S028FDV6CCV>'
 
       - name: Upload encoded data
         if: always()
@@ -165,7 +165,7 @@ jobs:
           webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
           status: ${{ job.status }}
           channel: '#protocol-internal'
-          message: 'Ethers encode failed! cc <!subteam^S028FDV6CCV>'
+          message: 'Ethereum: Ethers encoding failed! cc <!subteam^S028FDV6CCV>'
 
       - name: Upload encoded data
         if: always()
@@ -227,13 +227,13 @@ jobs:
           git diff --quiet --diff-filter=M
 
       - name: Report result to Slack
-        if: always()
+        if: failure() && github.event_name == 'schedule'
         uses: act10ns/slack@v2
         with:
           webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
           status: ${{ job.status }}
           channel: '#protocol-internal'
-          message: 'Encoding diff complete! cc <!subteam^S028FDV6CCV>'
+          message: 'Ethereum: encoding comparison failed! cc <!subteam^S028FDV6CCV>'
 
   decode-transactions:
     needs:
@@ -244,6 +244,10 @@ jobs:
     # blocks that were produced. !cancelled() keeps manual/cancel behaviour intact.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-26.04
+    # Both source-chain workflows decode against the same devnet RPC quota.
+    concurrency:
+      group: compare-encoding-devnet-decode-${{ github.ref }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v7
 
@@ -262,6 +266,7 @@ jobs:
           pattern: encoded-by-ethers
 
       - name: Decode transactions
+        id: decode
         # the script paces itself against the RPC quota, so bound the step in
         # case it ends up crawling at the widest pace
         timeout-minutes: 10
@@ -275,10 +280,10 @@ jobs:
             150
 
       - name: Report result to Slack
-        if: always()
+        if: failure() && github.event_name == 'schedule'
         uses: act10ns/slack@v2
         with:
           webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
           status: ${{ job.status }}
           channel: '#protocol-internal'
-          message: 'Decoding transactions complete! cc <!subteam^S028FDV6CCV>'
+          message: 'Ethereum: decoding/proof/gas check failed on devnet! cc <!subteam^S028FDV6CCV>'
