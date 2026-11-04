@@ -9,6 +9,7 @@ import { decoder, health, rateLimit } from '../utils';
 import EvmV1DecoderABI from '../utils/evmV1DecoderAbi.json';
 import { blockProver, chainInfo, proofProvider } from '../';
 import { blockNumberFromPath, isExpectedProofSkip, ProofSkipReason, sampleEvenly } from './decode-policy';
+import { runDecodeCheck } from './decode-check';
 
 type ProofLookup =
   { response: proofProvider.ContinuityResponse; skipReason: null } | { response: null; skipReason: ProofSkipReason };
@@ -308,7 +309,6 @@ async function decodeBlocks(
     );
   }
   console.log(`DONE (final pace: one transaction every ${pacer.currentDelayMs}ms)`);
-  process.exit(0);
 }
 
 if (process.argv.length < 5) {
@@ -326,7 +326,10 @@ const chainKey = parseInt(process.argv[6]);
 // optional: 0 (the default) decodes everything, which is only viable off CI
 const maxTransactions = parseInt(process.argv[7]) || 0;
 
-decodeBlocks(rpcUrl, proverUrl, evmV1DecoderAddress, pathToStore, chainKey, maxTransactions).catch((reason) => {
-  console.error(reason);
-  process.exit(1);
-});
+runDecodeCheck(() => decodeBlocks(rpcUrl, proverUrl, evmV1DecoderAddress, pathToStore, chainKey, maxTransactions)).then(
+  () => process.exit(0),
+  (reason) => {
+    console.error(reason);
+    process.exit(1);
+  },
+);
