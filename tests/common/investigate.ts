@@ -719,7 +719,7 @@ export async function investigateEncoding() {
 
   // Encode
   console.log('Encoding transaction and receipt...');
-  const encodeResult = abiEncode(tx, receipt, EncodingVersion.V1);
+  const encodeResult = abiEncode({ kind: 'ethereum', tx, rx: receipt }, EncodingVersion.V1);
   console.log(`✅ Encoded ${encodeResult.types.length} fields`);
   console.log(`✅ ABI string length: ${encodeResult.abi.length} chars\n`);
 

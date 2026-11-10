@@ -71,6 +71,30 @@ instead of iterating over each transaction one at a time. See
 Here's an example showing how to use the proof generator components together:
 [examples/end-to-end.ts](https://github.com/gluwa/attestcoin-sdk-ts/blob/main/examples/end-to-end.ts).
 
+## Transaction encoding
+
+`encoding.abiEncode(input, version)` turns a transaction and its receipt into the Merkle leaf that gets attested.
+The `kind` of the input selects the leaf layout:
+
+```ts
+import { encoding } from '@gluwa/attestcoin-sdk';
+
+// Ethereum transaction types 0-4 (also the non-deposit transactions of an OP-Stack block)
+const leaf = encoding.abiEncode({ kind: 'ethereum', tx: txWithRaw, rx: receipt });
+
+// OP-Stack deposit (type 0x7e, e.g. Base or OP Mainnet)
+const depositLeaf = encoding.abiEncode({ kind: 'opDeposit', tx: deposit, rx: receipt });
+```
+
+ethers cannot represent the OP-Stack `0x7e` deposit type, so deposits use `encoding.opStack.DepositTransaction`
+and parsing it out of an RPC response is up to the caller. Set its `nonce` with
+`encoding.opStack.canonicalNonce({ depositNonce, depositReceiptVersion })`: the receipt's `depositNonce` from Canyon
+onward, zero before, because neither header root commits to the RPC nonce before Canyon.
+`encoding.opStack.computedHash(deposit)` reproduces the transaction hash, which lets you check an RPC-reported hash
+against the fields you parsed. The leaf layout (`txType = 126`, three chunks) is documented in
+[src/encoding/abi/op-stack/index.ts](https://github.com/gluwa/attestcoin-sdk-ts/blob/main/src/encoding/abi/op-stack/index.ts).
+The Query Builder has no `0x7e` field mapping yet, so deposits cannot be queried field by field.
+
 ## Query Builder
 
 The `QueryBuilder` is used to extract result segments from transactions which

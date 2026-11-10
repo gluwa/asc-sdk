@@ -1,6 +1,7 @@
 import { TransactionResponse, TransactionReceipt, AccessList, AbiCoder, Authorization } from 'ethers';
-import { addressOrZero } from '../utils';
-import { EncodingResult, RawAuthorization, RawTransactionResponse, TransactionWithRaw } from '..';
+import { addressOrZero } from '../../utils';
+import { RawAuthorization, RawTransactionResponse, TransactionWithRaw } from '../../common';
+import { EncodingResult } from '../common';
 
 /**
  * Encodes common transaction fields that are shared across all transaction types

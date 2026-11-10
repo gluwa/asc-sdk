@@ -12,3 +12,4 @@ package-lock.json
 
 # TS Config
 tsconfig.json
+tests/fixtures/*.json

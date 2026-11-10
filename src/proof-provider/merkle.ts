@@ -69,7 +69,7 @@ export function computeMerkleRootOfBlock(
   // Encode all transactions in the block
   const leaves = transactions.map((tx, index) => {
     const receipt = receipts[index];
-    const result = abiEncode(tx, receipt, encoding);
+    const result = abiEncode({ kind: 'ethereum', tx, rx: receipt }, encoding);
 
     return result.abi;
   });

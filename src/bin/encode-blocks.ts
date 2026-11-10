@@ -52,7 +52,7 @@ async function encodeTransaction(
     // 80 credits
     receipt = await provider.getTransactionReceipt(txHash);
   }
-  const encodedData = abiEncode(transaction!, receipt!);
+  const encodedData = abiEncode({ kind: 'ethereum', tx: transaction!, rx: receipt! });
   return encodedData.abi;
 }
 

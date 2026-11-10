@@ -43,7 +43,7 @@ test('Query Builder should be able to build a query', async () => {
   const transaction = await getTransactionWithRaw(provider, transactionHash);
   const receipt = await provider.getTransactionReceipt(transactionHash);
   const builder = QueryBuilder.createFromTransaction(transaction!, receipt!);
-  const abiEncoded = abiEncode(transaction!, receipt!);
+  const abiEncoded = abiEncode({ kind: 'ethereum', tx: transaction!, rx: receipt! });
 
   builder.setAbiProvider(async (contractAddress) => {
     return JSON.stringify(ERC20_BURN_ABI);
@@ -161,7 +161,7 @@ test('Build query from transactions with multiple events', async () => {
   const transaction = await getTransactionWithRaw(provider, transactionHash);
   const receipt = await provider.getTransactionReceipt(transactionHash);
   const builder = QueryBuilder.createFromTransaction(transaction!, receipt!);
-  const abiEncoded = abiEncode(transaction!, receipt!);
+  const abiEncoded = abiEncode({ kind: 'ethereum', tx: transaction!, rx: receipt! });
 
   builder.setAbiProvider(async (contractAddress) => {
     switch (contractAddress.toLowerCase()) {

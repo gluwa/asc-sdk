@@ -30,7 +30,7 @@ export function computeAllOffsets(
   rx: TransactionReceipt,
   encoding: EncodingVersion = EncodingVersion.V1,
 ): { map: Map<QueryableFields, FieldMetadata>; computedOffsets: FieldMetadata[] } {
-  const result = abiEncode(tx, rx, encoding);
+  const result = abiEncode({ kind: 'ethereum', tx, rx }, encoding);
 
   // Get explicit chunk definitions
   const fieldMapping = getAllFieldsForTransaction(tx.formatted.type, encoding);

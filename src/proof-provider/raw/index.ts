@@ -98,7 +98,7 @@ export class RawProofBuilder implements ProofProvider {
     // which will be the leaves of the merkle tree
     const encodedTx = transactions.map((txData, idx) => {
       // ABI encoded transaction + receipt
-      const encoded = abiEncode(txData!, orderedReceipts[idx], EncodingVersion.V1);
+      const encoded = abiEncode({ kind: 'ethereum', tx: txData!, rx: orderedReceipts[idx] }, EncodingVersion.V1);
 
       return encoded.abi;
     });
