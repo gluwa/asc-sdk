@@ -11,7 +11,10 @@ use futures_util::StreamExt;
 use std::env;
 use std::fs;
 use std::str::FromStr;
-use std::time::SystemTime;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime};
+
+use tokio::time::Instant;
 
 use attestcoin_abi_encoding::abi::abi_encode;
 use attestcoin_abi_encoding::common::EncodingVersion;
@@ -26,13 +29,72 @@ pub struct CliArguments {
     pub path_to_store_json: String,
 }
 
+/// Spaces out RPC requests to stay under a provider's per-second request limit.
+/// Without it, every transaction in a block is fetched at once, which can burst
+/// past the limit of plans like QuickNode's.
+///
+/// Callers get evenly spaced slots in the order they ask, so the provider never
+/// sees more than the configured number of requests in any second. Configured by
+/// the `RPC_MAX_REQUESTS_PER_SECOND` env var; unset or 0 disables limiting.
+#[derive(Clone)]
+struct RateLimiter {
+    max_per_second: f64,
+    interval: Option<Duration>,
+    next_slot: Arc<Mutex<Instant>>,
+}
+
+impl RateLimiter {
+    fn from_env() -> Result<Self> {
+        let max_per_second: f64 = match env::var("RPC_MAX_REQUESTS_PER_SECOND") {
+            Ok(raw) if !raw.is_empty() => raw.parse().map_err(|_| {
+                anyhow::anyhow!("RPC_MAX_REQUESTS_PER_SECOND must be a number, got '{raw}'")
+            })?,
+            _ => 0.0,
+        };
+        anyhow::ensure!(
+            max_per_second.is_finite() && max_per_second >= 0.0,
+            "RPC_MAX_REQUESTS_PER_SECOND must be a non-negative number, got {max_per_second}"
+        );
+
+        Ok(Self {
+            max_per_second,
+            interval: (max_per_second > 0.0).then(|| Duration::from_secs_f64(1.0 / max_per_second)),
+            next_slot: Arc::new(Mutex::new(Instant::now())),
+        })
+    }
+
+    fn describe(&self) -> String {
+        if self.interval.is_some() {
+            format!("{} req/s", self.max_per_second)
+        } else {
+            "none".into()
+        }
+    }
+
+    /// Waits until the caller may send its next RPC request.
+    async fn wait(&self) {
+        let Some(interval) = self.interval else {
+            return;
+        };
+        let slot = {
+            let mut next_slot = self.next_slot.lock().unwrap();
+            let slot = (*next_slot).max(Instant::now());
+            *next_slot = slot + interval;
+            slot
+        };
+        tokio::time::sleep_until(slot).await;
+    }
+}
+
 async fn encode_transaction(
     provider: impl Provider,
+    limiter: &RateLimiter,
     tx_hash_str: &str,
     rx_or_none: Option<TransactionReceipt>,
 ) -> Option<String> {
     let tx_hash = B256::from_str(tx_hash_str).unwrap();
 
+    limiter.wait().await;
     let tx = match provider.get_transaction_by_hash(tx_hash).await {
         Ok(Some(tx)) => tx,
         Ok(None) => {
@@ -47,17 +109,20 @@ async fn encode_transaction(
 
     let rx = match rx_or_none {
         Some(rx) => rx,
-        None => match provider.get_transaction_receipt(tx_hash).await {
-            Ok(Some(rx)) => rx,
-            Ok(None) => {
-                println!("    skipping tx {tx_hash_str}: receipt not found via RPC");
-                return None;
+        None => {
+            limiter.wait().await;
+            match provider.get_transaction_receipt(tx_hash).await {
+                Ok(Some(rx)) => rx,
+                Ok(None) => {
+                    println!("    skipping tx {tx_hash_str}: receipt not found via RPC");
+                    return None;
+                }
+                Err(e) => {
+                    println!("    skipping tx {tx_hash_str}: get_transaction_receipt failed: {e}");
+                    return None;
+                }
             }
-            Err(e) => {
-                println!("    skipping tx {tx_hash_str}: get_transaction_receipt failed: {e}");
-                return None;
-            }
-        },
+        }
     };
 
     let encoded_data = abi_encode(tx, rx, EncodingVersion::V1).unwrap();
@@ -69,11 +134,13 @@ async fn encode_transaction(
 async fn encode_and_write_to_disk(
     path: String,
     provider: impl Provider,
+    limiter: RateLimiter,
     block_number: u64,
     tx_hash: String,
     rx_or_none: Option<TransactionReceipt>,
 ) {
-    let Some(encoded_data) = encode_transaction(provider, &tx_hash.to_string(), rx_or_none).await
+    let Some(encoded_data) =
+        encode_transaction(provider, &limiter, &tx_hash.to_string(), rx_or_none).await
     else {
         // RPC returned None for this transaction (e.g. transient reorg or
         // unindexed tx); skip it rather than writing anything to disk.
@@ -90,6 +157,7 @@ async fn encode_and_write_to_disk(
 
 async fn block_handler(
     provider: impl Provider + Clone + 'static,
+    limiter: RateLimiter,
     block_number: u64,
     path_to_store_json: String,
 ) -> Result<()> {
@@ -104,6 +172,7 @@ async fn block_handler(
     let mut block = None;
     let mut last_err: Option<anyhow::Error> = None;
     for attempt in 1..=MAX_ATTEMPTS {
+        limiter.wait().await;
         match provider
             .get_block_by_number(block_number.into())
             .full()
@@ -137,6 +206,7 @@ async fn block_handler(
 
     if tx_hashes.len() >= 13 {
         // optimize RPC cost by fetching all receipts at once
+        limiter.wait().await;
         let receipts = provider
             .get_block_receipts(block_number.into())
             .await?
@@ -146,11 +216,13 @@ async fn block_handler(
             .map(|rcp| {
                 tokio::spawn({
                     let prv = provider.clone();
+                    let lim = limiter.clone();
                     let path = path_to_store_json.clone();
                     async move {
                         encode_and_write_to_disk(
                             path.clone(),
                             prv.clone(),
+                            lim,
                             block_number,
                             rcp.transaction_hash.to_string(),
                             Some(rcp),
@@ -171,11 +243,13 @@ async fn block_handler(
             .map(|tx_hash| {
                 tokio::spawn({
                     let prv = provider.clone();
+                    let lim = limiter.clone();
                     let path = path_to_store_json.clone();
                     async move {
                         encode_and_write_to_disk(
                             path.clone(),
                             prv.clone(),
+                            lim,
                             block_number,
                             tx_hash.to_string(),
                             None,
@@ -206,7 +280,9 @@ async fn main() -> Result<()> {
 
     let start = SystemTime::now();
     let timeout_minutes: u64 = env::var("TIMEOUT_MINUTES").unwrap_or("2".into()).parse()?;
+    let limiter = RateLimiter::from_env()?;
     println!("=== starting with timeout {timeout_minutes:?} mins ...");
+    println!("=== RPC rate limit: {}", limiter.describe());
 
     fs::create_dir_all(args.path_to_store_json.clone())?;
 
@@ -235,6 +311,7 @@ async fn main() -> Result<()> {
         for block_number in from..=block.number {
             let _ = block_handler(
                 provider.clone(),
+                limiter.clone(),
                 block_number,
                 args.path_to_store_json.clone(),
             )

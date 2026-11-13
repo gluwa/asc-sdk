@@ -128,3 +128,43 @@ describe('AdaptivePacer', () => {
     expect(elapsedMs).toBeGreaterThanOrEqual(50);
   });
 });
+
+describe('RequestRateLimiter', () => {
+  const elapsedMsSince = (startedAt: bigint) => Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+
+  test('does not hold requests back when disabled', async () => {
+    const limiter = new rateLimit.RequestRateLimiter(0);
+    expect(limiter.enabled).toBe(false);
+
+    const startedAt = process.hrtime.bigint();
+    await Promise.all(Array.from({ length: 50 }, () => limiter.wait()));
+
+    expect(elapsedMsSince(startedAt)).toBeLessThan(50);
+  });
+
+  test('spaces concurrent callers evenly instead of letting them burst', async () => {
+    // 20 req/s => one slot every 50ms; the 5th caller gets the slot 200ms in.
+    const limiter = new rateLimit.RequestRateLimiter(20);
+    expect(limiter.enabled).toBe(true);
+
+    const startedAt = process.hrtime.bigint();
+    const releasedAtMs = await Promise.all(
+      Array.from({ length: 5 }, async () => {
+        await limiter.wait();
+        return elapsedMsSince(startedAt);
+      }),
+    );
+
+    expect(releasedAtMs[0]).toBeLessThan(25);
+    // timers can fire a hair early, so allow a few ms of slack on the lower bound
+    expect(releasedAtMs[4]).toBeGreaterThanOrEqual(195);
+    for (let i = 1; i < releasedAtMs.length; i++) {
+      expect(releasedAtMs[i]).toBeGreaterThanOrEqual(releasedAtMs[i - 1]);
+    }
+  });
+
+  test('rejects a negative or non-numeric rate', () => {
+    expect(() => new rateLimit.RequestRateLimiter(-1)).toThrow('non-negative');
+    expect(() => new rateLimit.RequestRateLimiter(Number('abc'))).toThrow('non-negative');
+  });
+});

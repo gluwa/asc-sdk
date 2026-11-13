@@ -3,6 +3,7 @@ import { Block, WebSocketProvider, TransactionReceipt } from 'ethers';
 import { abiEncode } from '../encoding/abi';
 import { getTransactionWithRaw } from '../encoding';
 import { bytesInHexString } from '../utils/hex';
+import { rateLimit } from '../utils';
 
 // Maximum discovered size of ABI-encoded transaction data, in bytes.
 // Derived from the largest observed successfully-encoded transactions on mainnet:
@@ -14,6 +15,33 @@ import { bytesInHexString } from '../utils/hex';
 //   block 25238749, tx 0x5f60979ee18aba3f76122574e987f974fb1d7bacc372666f4b3f647236d54794
 //   block 25238746, tx 0xf2641f3bd13a111169c007205b3d1e7188201df3ae041991d2e1e3745ed1fb2d
 const MAX_ENCODED_SIZE = 503776;
+
+/**
+ * WebSocketProvider that holds every JSON-RPC request back until `limiter` gives
+ * it a slot. Without it, every transaction in a block is fetched at once, which
+ * can burst past the per-second limit of plans like QuickNode's.
+ */
+class RateLimitedWebSocketProvider extends WebSocketProvider {
+  constructor(
+    url: string,
+    private readonly limiter: rateLimit.RequestRateLimiter,
+  ) {
+    super(url);
+  }
+
+  async send(method: string, params: Array<any> | Record<string, any>): Promise<any> {
+    await this.limiter.wait();
+    return super.send(method, params);
+  }
+}
+
+/**
+ * Builds the RPC limiter from RPC_MAX_REQUESTS_PER_SECOND; unset means unlimited.
+ */
+function rateLimiterFromEnv(): rateLimit.RequestRateLimiter {
+  const raw = process.env.RPC_MAX_REQUESTS_PER_SECOND;
+  return new rateLimit.RequestRateLimiter(raw ? Number(raw) : 0);
+}
 
 /**
  * Gets all transaction receipts for a given block using regular Infura/compatible RPC format.
@@ -120,11 +148,13 @@ async function blockHandler(
 async function encodeBlocks(rpcUrl: string, pathToStoreJson: string): Promise<void> {
   const start = Date.now();
   const timeoutMinutes = parseInt(process.env.TIMEOUT_MINUTES || '2');
+  const limiter = rateLimiterFromEnv();
   console.log(`=== starting with timeout ${timeoutMinutes} mins ...`);
+  console.log(`=== RPC rate limit: ${limiter.enabled ? `${limiter.maxRequestsPerSecond} req/s` : 'none'}`);
 
   mkdirSync(pathToStoreJson, { recursive: true });
 
-  const provider = new WebSocketProvider(rpcUrl);
+  const provider = new RateLimitedWebSocketProvider(rpcUrl, limiter);
 
   // Fire the event whenever the block changes.
   // We can also fire on 'safe' or 'finalized' blocks

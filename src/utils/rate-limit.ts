@@ -163,3 +163,57 @@ export class AdaptivePacer {
     return this.delayMs;
   }
 }
+
+/**
+ * Caps the number of requests per second sent by any number of concurrent callers.
+ *
+ * {@link AdaptivePacer} spaces out the iterations of a single sequential loop,
+ * so callers that wait on it at the same time all go at once. This limiter
+ * gives each caller its own evenly spaced slot, in the order they ask, so a
+ * block's worth of requests fired off with `Promise.all` still reaches the far
+ * end at a steady rate instead of a burst that trips a per-second limit.
+ *
+ * @example
+ * ```ts
+ * const limiter = new RequestRateLimiter(25);
+ * await Promise.all(
+ *   txHashes.map(async (hash) => {
+ *     await limiter.wait();
+ *     return provider.send('eth_getTransactionByHash', [hash]);
+ *   }),
+ * );
+ * ```
+ */
+export class RequestRateLimiter {
+  private readonly intervalMs: number;
+  private nextSlotMs = 0;
+
+  /**
+   * @param maxRequestsPerSecond - the most requests to allow in any second; 0 disables limiting
+   */
+  constructor(public readonly maxRequestsPerSecond: number) {
+    if (!Number.isFinite(maxRequestsPerSecond) || maxRequestsPerSecond < 0) {
+      throw new Error(`maxRequestsPerSecond must be a non-negative number, got ${maxRequestsPerSecond}`);
+    }
+    this.intervalMs = maxRequestsPerSecond > 0 ? 1000 / maxRequestsPerSecond : 0;
+  }
+
+  /** Whether this limiter holds requests back at all. */
+  public get enabled(): boolean {
+    return this.intervalMs > 0;
+  }
+
+  /** Waits until the caller may send its next request. */
+  public async wait(): Promise<void> {
+    if (!this.enabled) {
+      return;
+    }
+
+    const now = Date.now();
+    const slot = Math.max(now, this.nextSlotMs);
+    this.nextSlotMs = slot + this.intervalMs;
+    if (slot > now) {
+      await new Promise((resolve) => setTimeout(resolve, slot - now));
+    }
+  }
+}

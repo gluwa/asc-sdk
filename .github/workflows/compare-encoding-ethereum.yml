@@ -131,11 +131,14 @@ jobs:
         run: |
           set -o pipefail
           node dist/bin/encode-blocks.js \
-            wss://blockchain.googleapis.com/v1/projects/creditcoin-test/locations/us-central1/endpoints/ethereum-mainnet/rpc?key=${{ secrets.GOOGLE_ETHEREUM_RPC_KEY }} \
+            wss://yolo-tame-glade.ethereum-mainnet.quiknode.pro/${{ secrets.QUICKNODE_ETHEREUM_RPC_KEY }} \
             /var/tmp/encoded-data/ethers/ \
             2>&1 | tee /var/tmp/ethers-encode.log
         env:
           TIMEOUT_MINUTES: ${{ needs.setup.outputs.timeout-minutes }}
+          # QuickNode's plan limit is shared with production RPC traffic and with
+          # the other compare-encoding workflow, so keep each job well under it.
+          RPC_MAX_REQUESTS_PER_SECOND: 25
 
       - name: Fail on MAX_ENCODED_SIZE errors
         if: always()
