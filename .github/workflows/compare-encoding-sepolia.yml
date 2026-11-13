@@ -76,10 +76,13 @@ jobs:
         working-directory: rust
         run: |
           ./target/release/encode-blocks \
-            --eth-rpc-url wss://blockchain.googleapis.com/v1/projects/creditcoin-test/locations/us-central1/endpoints/ethereum-sepolia/rpc?key=${{ secrets.GOOGLE_SEPOLIA_RPC_KEY }} \
+            --eth-rpc-url wss://cold-burned-log.ethereum-sepolia.quiknode.pro/${{ secrets.QUICKNODE_SEPOLIA_RPC_KEY }} \
             --path-to-store-json /var/tmp/encoded-data/alloy/
         env:
           TIMEOUT_MINUTES: ${{ needs.setup.outputs.timeout-minutes }}
+          # QuickNode's plan limit is shared with production RPC traffic and with
+          # the other compare-encoding workflow, so keep each job well under it.
+          RPC_MAX_REQUESTS_PER_SECOND: 25
 
       - name: Add notices in case of failure
         if: failure() && github.event_name == 'pull_request'
